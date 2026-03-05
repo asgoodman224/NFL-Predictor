@@ -4,9 +4,37 @@
 const loadGamesBtn = document.getElementById('loadGamesBtn');
 const gamesContainer = document.getElementById('gamesContainer');
 const weekSelect = document.getElementById('weekSelect');
+const homeLink = document.getElementById('homeLink');
+const customGameLink = document.getElementById('customGameLink');
+const controlsDiv = document.querySelector('.controls');
 
 // where the server is running
 const API_BASE_URL = 'http://localhost:5000';
+
+// navigation handling
+homeLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    showHomePage();
+});
+
+customGameLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    showCustomGamePage();
+});
+
+function showHomePage() {
+    homeLink.classList.add('active');
+    customGameLink.classList.remove('active');
+    controlsDiv.style.display = 'flex';
+    gamesContainer.innerHTML = '';
+}
+
+function showCustomGamePage() {
+    customGameLink.classList.add('active');
+    homeLink.classList.remove('active');
+    controlsDiv.style.display = 'none';
+    gamesContainer.innerHTML = '';
+}
 
 // when they click load games
 loadGamesBtn.addEventListener('click', loadGames);
