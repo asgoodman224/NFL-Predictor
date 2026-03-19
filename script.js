@@ -16,7 +16,6 @@ const awayYearSelect = document.getElementById('awayYearSelect');
 const awayTeamSelect = document.getElementById('awayTeamSelect');
 const homeTeamPreview = document.getElementById('homeTeamPreview');
 const awayTeamPreview = document.getElementById('awayTeamPreview');
-const neutralSiteCheck = document.getElementById('neutralSiteCheck');
 const predictCustomBtn = document.getElementById('predictCustomBtn');
 const customResultContainer = document.getElementById('customResultContainer');
 
@@ -311,7 +310,6 @@ async function predictCustomGame() {
     const homeYear = parseInt(homeYearSelect.value);
     const awayTeam = awayTeamSelect.value;
     const awayYear = parseInt(awayYearSelect.value);
-    const neutralSite = neutralSiteCheck.checked;
     
     if (!homeTeam || !awayTeam) {
         customResultContainer.innerHTML = `
@@ -349,7 +347,7 @@ async function predictCustomGame() {
                 home_year: homeYear,
                 away_team: awayTeam,
                 away_year: awayYear,
-                neutral_site: neutralSite
+                neutral_site: false
             })
         });
         
