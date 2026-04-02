@@ -16,6 +16,7 @@
         <ul>
             <li><a href="#" id="homeLink" class="active">Home</a></li>
             <li><a href="#" id="customGameLink">Custom Game</a></li>
+            <li><a href="#" id="nbaLink">NBA</a></li>
         </ul>
     </nav>
 
@@ -124,6 +125,25 @@
             </div>
         </div>
     </main>
+
+        <!-- NBA Section (hidden by default) -->
+        <div id="nbaContainer" style="display:none;">
+            <!-- Controls for selecting NBA games -->
+            <div class="controls" id="nbaControls">
+                <label for="nbaDateSelect">Select Date:</label>
+                <select id="nbaDateSelect">
+                    <option value="today">Today</option>
+                    <option value="tomorrow">Tomorrow</option>
+                    <option value="yesterday">Yesterday</option>
+                </select>
+                <button id="loadNBAGamesBtn">Load Games</button>
+            </div>
+
+            <!-- Container where NBA game predictions will show up -->
+            <div id="nbaGamesContainer">
+                <!-- NBA game cards will be loaded here -->
+            </div>
+        </div>
 
     <!-- Footer with copyright info and disclaimer -->
     <footer>

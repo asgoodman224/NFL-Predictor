@@ -11,6 +11,14 @@ body {
     color: #ffffff;
 }
 
+/* NBA Games Container */
+#nbaGamesContainer {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
 /* Header Styles */
 header {
     background-color: #000000;
@@ -86,7 +94,7 @@ main {
     align-items: center;
 }
 
-#weekSelect {
+#weekSelect, #nbaDateSelect {
     padding: 1rem 1.5rem;
     font-size: 1.1rem;
     border-radius: 8px;
@@ -98,13 +106,13 @@ main {
     transition: all 0.3s ease;
 }
 
-#weekSelect:focus {
+#weekSelect:focus, #nbaDateSelect:focus {
     outline: none;
     border-color: #3b82f6;
     box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
 }
 
-#loadGamesBtn {
+#loadGamesBtn, #loadNBAGamesBtn {
     background-color: #3b82f6;
     color: white;
     border: none;
@@ -119,13 +127,13 @@ main {
     letter-spacing: 1px;
 }
 
-#loadGamesBtn:hover {
+#loadGamesBtn:hover, #loadNBAGamesBtn:hover {
     background-color: #2563eb;
     transform: translateY(-2px);
     box-shadow: 0 6px 25px rgba(59, 130, 246, 0.5);
 }
 
-#loadGamesBtn:active {
+#loadGamesBtn:active, #loadNBAGamesBtn:active {
     transform: translateY(0);
 }
 

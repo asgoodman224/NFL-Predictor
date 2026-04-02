@@ -6,6 +6,8 @@ const gamesContainer = document.getElementById('gamesContainer');
 const weekSelect = document.getElementById('weekSelect');
 const homeLink = document.getElementById('homeLink');
 const customGameLink = document.getElementById('customGameLink');
+const nbaLink = document.getElementById('nbaLink');
+const nbaContainer = document.getElementById('nbaContainer');
 const controlsDiv = document.querySelector('.controls');
 
 // custom game elements
@@ -33,19 +35,38 @@ customGameLink.addEventListener('click', (e) => {
     showCustomGamePage();
 });
 
+nbaLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    showNBAPage();
+});
+
 function showHomePage() {
     homeLink.classList.add('active');
     customGameLink.classList.remove('active');
+    nbaLink.classList.remove('active');
     controlsDiv.style.display = 'flex';
     gamesContainer.style.display = 'grid';
     customGameContainer.style.display = 'none';
+    nbaContainer.style.display = 'none';
+}
+
+function showNBAPage() {
+    nbaLink.classList.add('active');
+    homeLink.classList.remove('active');
+    customGameLink.classList.remove('active');
+    controlsDiv.style.display = 'none';
+    gamesContainer.style.display = 'none';
+    customGameContainer.style.display = 'none';
+    nbaContainer.style.display = 'block';
 }
 
 function showCustomGamePage() {
     customGameLink.classList.add('active');
     homeLink.classList.remove('active');
+    nbaLink.classList.remove('active');
     controlsDiv.style.display = 'none';
     gamesContainer.style.display = 'none';
+    nbaContainer.style.display = 'none';
     customGameContainer.style.display = 'block';
     
     // initialize year dropdowns if not already done
