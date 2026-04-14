@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFL Game Predictor</title>
+    <title>NFL & NBA Game Predictor</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- Main header section with the site title -->
     <header>
-        <h1>NFL Game Predictor</h1>
+        <h1>Sports Game Predictor</h1>
     </header>
     <!-- Navigation bar -->
     <nav>
         <ul>
-            <li><a href="#" id="homeLink" class="active">Home</a></li>
+            <li><a href="#" id="homeLink" class="active">NFL</a></li>
             <li><a href="#" id="customGameLink">Custom Game</a></li>
             <li><a href="#" id="nbaLink">NBA</a></li>
         </ul>
@@ -26,6 +26,7 @@
             <label for="weekSelect">Select Week:</label>
             <select id="weekSelect">
                 <option value="current">Current Week</option>
+                <option value="demo">Demo Live Games</option>
                 <optgroup label="Regular Season">
                     <option value="1">Week 1</option>
                     <option value="2">Week 2</option>
@@ -135,6 +136,7 @@
                     <option value="today">Today</option>
                     <option value="tomorrow">Tomorrow</option>
                     <option value="yesterday">Yesterday</option>
+                    <option value="demo">🔴 Demo Live Games</option>
                 </select>
                 <button id="loadNBAGamesBtn">Load Games</button>
             </div>
@@ -147,7 +149,7 @@
 
     <!-- Footer with copyright info and disclaimer -->
     <footer>
-        <p>&copy; 2026 NFL Game Predictor</p>
+        <p>&copy; 2026 NFL & NBA Game Predictor</p>
         <p>Predictions are for entertainment purposes only</p>
     </footer>
 

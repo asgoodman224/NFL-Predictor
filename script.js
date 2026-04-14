@@ -10,6 +10,11 @@ const nbaLink = document.getElementById('nbaLink');
 const nbaContainer = document.getElementById('nbaContainer');
 const controlsDiv = document.querySelector('.controls');
 
+// nba elements
+const loadNBAGamesBtn = document.getElementById('loadNBAGamesBtn');
+const nbaGamesContainer = document.getElementById('nbaGamesContainer');
+const nbaDateSelect = document.getElementById('nbaDateSelect');
+
 // custom game elements
 const customGameContainer = document.getElementById('customGameContainer');
 const homeYearSelect = document.getElementById('homeYearSelect');
@@ -88,7 +93,10 @@ async function loadGames() {
         const selection = weekSelect.value;
         let url = `${API_BASE_URL}/api/games`;
         
-        if (selection === 'full') {
+        if (selection === 'demo') {
+            url = `${API_BASE_URL}/api/demo/live`;
+            gamesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading Demo Live Games...</div>';
+        } else if (selection === 'full') {
             url += '?season=full';
             gamesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading Full Season...</div>';
         } else if (selection !== 'current') {
@@ -115,8 +123,22 @@ async function loadGames() {
                 const gameCard = createGameCard(game, index + 1);
                 gamesContainer.appendChild(gameCard);
             });
+            
+            // if demo mode, show auto-refresh message and start auto-refresh
+            if (data.demo_mode) {
+                const refreshMsg = document.createElement('div');
+                refreshMsg.className = 'demo-refresh-msg';
+                refreshMsg.innerHTML = '🔴 DEMO MODE - Games update every 5 seconds (Full game = ~4.5 min)';
+                gamesContainer.insertBefore(refreshMsg, gamesContainer.firstChild);
+                
+                // auto-refresh every 5 seconds in demo mode
+                startDemoRefresh('nfl');
+            } else {
+                stopDemoRefresh('nfl');
+            }
         } else {
             gamesContainer.innerHTML = '<div class="no-games">No games available for this week.</div>';
+            stopDemoRefresh('nfl');
         }
         
     } catch (error) {
@@ -127,6 +149,69 @@ async function loadGames() {
                 <p>Please make sure the prediction server is running and try again.</p>
             </div>
         `;
+        stopDemoRefresh('nfl');
+    }
+}
+
+// demo refresh intervals
+let nflDemoInterval = null;
+let nbaDemoInterval = null;
+
+function startDemoRefresh(sport) {
+    if (sport === 'nfl') {
+        if (nflDemoInterval) clearInterval(nflDemoInterval);
+        nflDemoInterval = setInterval(() => {
+            if (weekSelect.value === 'demo') {
+                loadGamesQuiet();
+            } else {
+                stopDemoRefresh('nfl');
+            }
+        }, 5000);
+    } else if (sport === 'nba') {
+        if (nbaDemoInterval) clearInterval(nbaDemoInterval);
+        nbaDemoInterval = setInterval(() => {
+            if (nbaDateSelect.value === 'demo') {
+                loadNBAGamesQuiet();
+            } else {
+                stopDemoRefresh('nba');
+            }
+        }, 5000);
+    }
+}
+
+function stopDemoRefresh(sport) {
+    if (sport === 'nfl' && nflDemoInterval) {
+        clearInterval(nflDemoInterval);
+        nflDemoInterval = null;
+    } else if (sport === 'nba' && nbaDemoInterval) {
+        clearInterval(nbaDemoInterval);
+        nbaDemoInterval = null;
+    }
+}
+
+// quiet reload without loading spinner (for auto-refresh)
+async function loadGamesQuiet() {
+    try {
+        const selection = weekSelect.value;
+        let url = `${API_BASE_URL}/api/demo/live`;
+        
+        const response = await fetch(url);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        if (!data.success || !data.games) return;
+        
+        // keep the demo message
+        const existingMsg = gamesContainer.querySelector('.demo-refresh-msg');
+        gamesContainer.innerHTML = '';
+        if (existingMsg) gamesContainer.appendChild(existingMsg);
+        
+        data.games.forEach((game, index) => {
+            const gameCard = createGameCard(game, index + 1);
+            gamesContainer.appendChild(gameCard);
+        });
+    } catch (error) {
+        console.error('Error refreshing games:', error);
     }
 }
 
@@ -134,6 +219,11 @@ async function loadGames() {
 function createGameCard(game, gameNumber) {
     const card = document.createElement('div');
     card.className = 'game-card';
+    
+    // check for live data
+    const liveData = game.live_data || {};
+    const isLive = liveData.is_live || false;
+    const isFinal = liveData.is_final || false;
 
     // make the date look nice
     let dateStr = '';
@@ -189,10 +279,51 @@ function createGameCard(game, gameNumber) {
             <small>Season Record - ${game.home_team}: ${homeRecord} (${homeStreak}) | ${game.away_team}: ${awayRecord} (${awayStreak})</small>
         </div>`;
     }
+    
+    // build live score display
+    let liveScoreDisplay = '';
+    let statusBadge = '';
+    let liveProbDisplay = '';
+    
+    if (isLive) {
+        statusBadge = '<div class="status-badge live-badge">LIVE</div>';
+        liveScoreDisplay = `
+            <div class="live-score">
+                <span class="score">${liveData.home_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.away_score || 0}</span>
+            </div>
+            <div class="game-clock">Q${liveData.period || 1} - ${liveData.clock || '15:00'}</div>
+        `;
+        liveProbDisplay = `
+            <div class="live-probability">
+                <div class="live-prob-label">Live Win Probability</div>
+                <div class="live-prob-bar">
+                    <div class="live-prob-fill home" style="width: ${liveData.live_probability || 50}%"></div>
+                </div>
+                <div class="live-prob-values">
+                    <span>${game.home_team}: ${liveData.live_probability || 50}%</span>
+                    <span>${game.away_team}: ${(100 - (liveData.live_probability || 50)).toFixed(1)}%</span>
+                </div>
+            </div>
+        `;
+    } else if (isFinal) {
+        statusBadge = '<div class="status-badge final-badge">FINAL</div>';
+        liveScoreDisplay = `
+            <div class="final-score">
+                <span class="score">${liveData.home_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.away_score || 0}</span>
+            </div>
+        `;
+    }
 
     card.innerHTML = `
         <h3>Game ${gameNumber}</h3>
-        ${weekInfo}
+        <div class="badge-container">
+            ${weekInfo}
+            ${statusBadge}
+        </div>
         ${dateStr ? `<div class="game-date">${dateStr}</div>` : ''}
         ${game.venue ? `<div class="venue">${game.venue}</div>` : ''}
         <div class="matchup">
@@ -200,16 +331,25 @@ function createGameCard(game, gameNumber) {
             <span class="vs">@</span>
             <span class="team">${game.home_team}</span>
         </div>
+        ${liveScoreDisplay}
+        ${liveProbDisplay}
         ${rookieIndicator ? `<div class="rookie-indicators">${rookieIndicator}</div>` : ''}
         ${injuryInfo}
         <div class="prediction">
-            <div class="prediction-label">Predicted Winner</div>
+            <div class="prediction-label">${isFinal ? 'Final Result' : 'Predicted Winner'}</div>
             <div class="predicted-winner">${game.predicted_winner}</div>
-            <div class="confidence">Confidence: ${game.confidence}%</div>
-            <div class="confidence">Predicted Score: ${game.predicted_score}</div>
+            <div class="confidence">${isLive ? 'Live' : ''} Confidence: ${game.confidence}%</div>
+            ${!isLive && !isFinal ? `<div class="confidence">Predicted Score: ${game.predicted_score}</div>` : ''}
         </div>
         ${formInfo}
     `;
+    
+    // add live class for styling
+    if (isLive) {
+        card.classList.add('live-game');
+    } else if (isFinal) {
+        card.classList.add('final-game');
+    }
 
     return card;
 }
@@ -516,3 +656,229 @@ awayTeamSelect.addEventListener('change', () => {
 });
 
 predictCustomBtn.addEventListener('click', predictCustomGame);
+
+// ========== NBA PREDICTOR FUNCTIONS ==========
+
+// load nba games when button is clicked
+if (loadNBAGamesBtn) {
+    loadNBAGamesBtn.addEventListener('click', loadNBAGames);
+}
+
+async function loadNBAGames() {
+    // show loading spinner while we wait
+    nbaGamesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading NBA Games...</div>';
+
+    try {
+        // figure out which date they want
+        const selection = nbaDateSelect.value;
+        let url = `${API_BASE_URL}/api/nba/games`;
+        
+        // handle demo mode
+        if (selection === 'demo') {
+            url = `${API_BASE_URL}/api/nba/demo/live`;
+            nbaGamesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading Demo Live Games...</div>';
+        } else {
+            // calculate date based on selection
+            const today = new Date();
+            let dateStr = '';
+            
+            if (selection === 'today') {
+                dateStr = formatDate(today);
+            } else if (selection === 'tomorrow') {
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                dateStr = formatDate(tomorrow);
+            } else if (selection === 'yesterday') {
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                dateStr = formatDate(yesterday);
+            }
+            
+            if (dateStr) {
+                url += `?date=${dateStr}`;
+            }
+        }
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error('Could not load NBA games');
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load NBA games');
+        }
+        
+        nbaGamesContainer.innerHTML = '';
+        
+        // show each game
+        if (data.games && data.games.length > 0) {
+            data.games.forEach((game, index) => {
+                const gameCard = createNBAGameCard(game, index + 1);
+                nbaGamesContainer.appendChild(gameCard);
+            });
+            
+            // if demo mode, show auto-refresh message and start auto-refresh
+            if (data.demo_mode) {
+                const refreshMsg = document.createElement('div');
+                refreshMsg.className = 'demo-refresh-msg';
+                refreshMsg.innerHTML = '🔴 DEMO MODE - Games update every 5 seconds (Full game = ~5 min)';
+                nbaGamesContainer.insertBefore(refreshMsg, nbaGamesContainer.firstChild);
+                
+                startDemoRefresh('nba');
+            } else {
+                stopDemoRefresh('nba');
+            }
+        } else {
+            nbaGamesContainer.innerHTML = '<div class="no-games">No NBA games available for this date.</div>';
+            stopDemoRefresh('nba');
+        }
+        
+    } catch (error) {
+        console.error('Error loading NBA games:', error);
+        nbaGamesContainer.innerHTML = `
+            <div class="error-message">
+                <h3>Unable to Load NBA Games</h3>
+                <p>Please make sure the prediction server is running and try again.</p>
+            </div>
+        `;
+        stopDemoRefresh('nba');
+    }
+}
+
+// quiet reload for NBA without loading spinner (for auto-refresh)
+async function loadNBAGamesQuiet() {
+    try {
+        let url = `${API_BASE_URL}/api/nba/demo/live`;
+        
+        const response = await fetch(url);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        if (!data.success || !data.games) return;
+        
+        // keep the demo message
+        const existingMsg = nbaGamesContainer.querySelector('.demo-refresh-msg');
+        nbaGamesContainer.innerHTML = '';
+        if (existingMsg) nbaGamesContainer.appendChild(existingMsg);
+        
+        data.games.forEach((game, index) => {
+            const gameCard = createNBAGameCard(game, index + 1);
+            nbaGamesContainer.appendChild(gameCard);
+        });
+    } catch (error) {
+        console.error('Error refreshing NBA games:', error);
+    }
+}
+
+// format date as YYYYMMDD for espn api
+function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+}
+
+// builds the html for each nba game card
+function createNBAGameCard(game, gameNumber) {
+    const card = document.createElement('div');
+    card.className = 'game-card nba-game-card';
+    
+    // check for live data
+    const liveData = game.live_data || {};
+    const isLive = liveData.is_live || false;
+    const isFinal = liveData.is_final || false;
+
+    // make the date look nice
+    let dateStr = '';
+    if (game.game_date) {
+        const date = new Date(game.game_date);
+        dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    // their records and streaks
+    let formInfo = '';
+    if (game.analysis) {
+        const homeForm = game.analysis.home_form || {};
+        const awayForm = game.analysis.away_form || {};
+        const homeRecord = `${homeForm.wins || 0}W-${homeForm.losses || 0}L`;
+        const awayRecord = `${awayForm.wins || 0}W-${awayForm.losses || 0}L`;
+        
+        formInfo = `<div class="form-info">
+            <small>Season Record - ${game.home_team}: ${homeRecord} | ${game.away_team}: ${awayRecord}</small>
+        </div>`;
+    }
+    
+    // build live score display
+    let liveScoreDisplay = '';
+    let statusBadge = '';
+    let liveProbDisplay = '';
+    
+    if (isLive) {
+        statusBadge = '<div class="status-badge live-badge">LIVE</div>';
+        liveScoreDisplay = `
+            <div class="live-score">
+                <span class="score">${liveData.home_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.away_score || 0}</span>
+            </div>
+            <div class="game-clock">Q${liveData.period || 1} - ${liveData.clock || '12:00'}</div>
+        `;
+        liveProbDisplay = `
+            <div class="live-probability">
+                <div class="live-prob-label">Live Win Probability</div>
+                <div class="live-prob-bar">
+                    <div class="live-prob-fill home" style="width: ${liveData.live_probability || 50}%"></div>
+                </div>
+                <div class="live-prob-values">
+                    <span>${game.home_team}: ${liveData.live_probability || 50}%</span>
+                    <span>${game.away_team}: ${(100 - (liveData.live_probability || 50)).toFixed(1)}%</span>
+                </div>
+            </div>
+        `;
+    } else if (isFinal) {
+        statusBadge = '<div class="status-badge final-badge">FINAL</div>';
+        liveScoreDisplay = `
+            <div class="final-score">
+                <span class="score">${liveData.home_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.away_score || 0}</span>
+            </div>
+        `;
+    }
+
+    card.innerHTML = `
+        <h3>Game ${gameNumber}</h3>
+        <div class="badge-container">
+            <div class="sport-badge nba-badge">NBA</div>
+            ${statusBadge}
+        </div>
+        ${dateStr ? `<div class="game-date">${dateStr}</div>` : ''}
+        ${game.venue ? `<div class="venue">${game.venue}</div>` : ''}
+        <div class="matchup">
+            <span class="team">${game.away_team}</span>
+            <span class="vs">@</span>
+            <span class="team">${game.home_team}</span>
+        </div>
+        ${liveScoreDisplay}
+        ${liveProbDisplay}
+        <div class="prediction nba-prediction">
+            <div class="prediction-label">${isFinal ? 'Final Result' : 'Predicted Winner'}</div>
+            <div class="predicted-winner">${game.predicted_winner}</div>
+            <div class="confidence">${isLive ? 'Live' : ''} Confidence: ${game.confidence}%</div>
+            ${!isLive && !isFinal ? `<div class="confidence">Predicted Score: ${game.predicted_score}</div>` : ''}
+        </div>
+        ${formInfo}
+    `;
+    
+    // add live class for styling
+    if (isLive) {
+        card.classList.add('live-game');
+    } else if (isFinal) {
+        card.classList.add('final-game');
+    }
+
+    return card;
+}

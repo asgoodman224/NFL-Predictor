@@ -912,6 +912,55 @@ footer p {
     line-height: 1.5;
 }
 
+/* ========== NBA SPECIFIC STYLES ========== */
+
+/* NBA Container */
+#nbaContainer {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+#nbaControls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+/* NBA Game Card Styles */
+.nba-game-card {
+    border-left: 4px solid #c9082a;
+}
+
+.nba-game-card:hover {
+    box-shadow: 0 8px 30px rgba(201, 8, 42, 0.2);
+    border-color: #c9082a;
+}
+
+/* NBA Prediction */
+.nba-prediction {
+    background: linear-gradient(135deg, #c9082a, #17408b);
+}
+
+/* Sport Badge */
+.sport-badge {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.5rem;
+}
+
+.nba-badge {
+    background: linear-gradient(135deg, #c9082a, #17408b);
+    color: white;
+}
+
 /* Responsive Design for Custom Game */
 @media (max-width: 768px) {
     .custom-game-panels {
@@ -942,5 +991,214 @@ footer p {
     
     .prediction-details {
         gap: 1rem;
+    }
+    
+    #nbaControls {
+        flex-direction: column;
+    }
+}
+
+/* ========== LIVE GAME STYLES ========== */
+
+/* Badge Container */
+.badge-container {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.live-badge {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    animation: pulse-live 2s infinite;
+}
+
+@keyframes pulse-live {
+    0%, 100% {
+        box-shadow: 0 0 5px rgba(220, 38, 38, 0.5);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(220, 38, 38, 0.8);
+    }
+}
+
+.final-badge {
+    background: linear-gradient(135deg, #374151, #4b5563);
+    color: white;
+}
+
+/* Live Score Display */
+.live-score, .final-score {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+}
+
+.live-score .score,
+.final-score .score {
+    font-size: 2rem;
+    font-weight: 900;
+    color: white;
+    min-width: 3rem;
+    text-align: center;
+}
+
+.score-separator {
+    font-size: 1.5rem;
+    color: #666;
+}
+
+.game-clock {
+    text-align: center;
+    font-size: 0.9rem;
+    color: #fbbf24;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+/* Live Win Probability */
+.live-probability {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+}
+
+.live-prob-label {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.5rem;
+}
+
+.live-prob-bar {
+    height: 12px;
+    background: linear-gradient(90deg, #333, #555);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.live-prob-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease;
+}
+
+.live-prob-fill.home {
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.live-prob-values {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #aaa;
+}
+
+/* Live Game Card Styling */
+.game-card.live-game {
+    border: 2px solid #dc2626;
+    animation: border-pulse 3s infinite;
+}
+
+@keyframes border-pulse {
+    0%, 100% {
+        border-color: #dc2626;
+        box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+    }
+    50% {
+        border-color: #ef4444;
+        box-shadow: 0 0 20px rgba(220, 38, 38, 0.5);
+    }
+}
+
+.game-card.final-game {
+    border-left: 4px solid #4b5563;
+    opacity: 0.9;
+}
+
+/* NBA Live Badge Color */
+.nba-game-card.live-game {
+    border-color: #c9082a;
+    animation: nba-border-pulse 3s infinite;
+}
+
+@keyframes nba-border-pulse {
+    0%, 100% {
+        border-color: #c9082a;
+        box-shadow: 0 0 10px rgba(201, 8, 42, 0.3);
+    }
+    50% {
+        border-color: #17408b;
+        box-shadow: 0 0 20px rgba(23, 64, 139, 0.5);
+    }
+}
+
+.nba-game-card .live-prob-fill.home {
+    background: linear-gradient(90deg, #c9082a, #17408b);
+}
+
+/* Responsive Design for Live Features */
+@media (max-width: 768px) {
+    .live-score .score,
+    .final-score .score {
+        font-size: 1.5rem;
+        min-width: 2.5rem;
+    }
+    
+    .live-prob-values {
+        flex-direction: column;
+        gap: 0.25rem;
+        text-align: center;
+    }
+    
+    .badge-container {
+        justify-content: center;
+    }
+}
+
+/* Demo Mode Refresh Message */
+.demo-refresh-msg {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, #dc2626, #991b1b);
+    color: white;
+    padding: 1rem 1.5rem;
+    border-radius: 10px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    animation: demo-pulse 2s infinite;
+    box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4);
+}
+
+@keyframes demo-pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.9;
+        transform: scale(1.01);
     }
 }

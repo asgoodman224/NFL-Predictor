@@ -5,15 +5,17 @@ import os
 from datetime import datetime, timedelta
 import json
 from dotenv import load_dotenv
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+import math
 
 # grab any saved settings from .env file
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# import and register nba blueprint
+from nba import nba_bp
+app.register_blueprint(nba_bp)
 
 # my api keys go here
 API_KEYS = {
@@ -28,13 +30,18 @@ class NFLPredictor:
         self.cache = {}
         self.cache_timeout = 3600  # cache stuff for an hour so we dont spam the api
         
-        # logistic regression model for predictions
-        self.model = LogisticRegression(max_iter=1000, random_state=42)
-        self.scaler = StandardScaler()
-        self.model_trained = False
+        # ========== ELO RATING SYSTEM ==========
+        # Elo parameters tuned for NFL
+        self.BASE_ELO = 1500  # starting rating for all teams
+        self.K_FACTOR = 20  # how much ratings change per game (higher = more volatile)
+        self.HOME_ADVANTAGE = 65  # home field worth ~65 Elo points (~2.5 pts)
+        self.elo_ratings = {}  # current Elo for each team
         
-        # train the model when we start up
-        self.train_model()
+        # initialize all teams with base Elo
+        self.initialize_elo_ratings()
+        
+        # build Elo from completed games
+        self.train_elo_model()
         
     def get_current_week_games(self):
         """gets this weeks games from espn"""
@@ -104,7 +111,7 @@ class NFLPredictor:
         return all_games
     
     def parse_espn_game(self, event):
-        """pulls out the important stuff from espn's game data"""
+        """pulls out the important stuff from espn's game data including live scores"""
         try:
             competition = event['competitions'][0]
             competitors = competition['competitors']
@@ -116,6 +123,27 @@ class NFLPredictor:
             home_record = home_team.get('records', [{}])[0].get('summary', '0-0') if home_team.get('records') else '0-0'
             away_record = away_team.get('records', [{}])[0].get('summary', '0-0') if away_team.get('records') else '0-0'
             
+            # ========== LIVE SCORE DATA ==========
+            status_obj = event.get('status', {})
+            status_type = status_obj.get('type', {})
+            
+            # game state: pre, in, post
+            game_state = status_type.get('state', 'pre')
+            is_live = game_state == 'in'
+            is_final = status_type.get('completed', False)
+            
+            # get current scores
+            home_score = int(home_team.get('score', 0)) if home_team.get('score') else 0
+            away_score = int(away_team.get('score', 0)) if away_team.get('score') else 0
+            
+            # get game clock info
+            clock = status_obj.get('displayClock', '')
+            period = status_obj.get('period', 0)
+            
+            # period display (1st, 2nd, 3rd, 4th, OT)
+            period_names = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th'}
+            period_display = period_names.get(period, f'OT{period-4}' if period > 4 else '')
+            
             return {
                 'game_id': event['id'],
                 'home_team': home_team['team']['displayName'],
@@ -126,7 +154,16 @@ class NFLPredictor:
                 'away_record': away_record,
                 'game_date': event.get('date', ''),
                 'venue': competition.get('venue', {}).get('fullName', 'TBD'),
-                'status': event.get('status', {}).get('type', {}).get('description', 'Scheduled')
+                'status': status_type.get('description', 'Scheduled'),
+                # live game data
+                'is_live': is_live,
+                'is_final': is_final,
+                'game_state': game_state,
+                'home_score': home_score,
+                'away_score': away_score,
+                'clock': clock,
+                'period': period,
+                'period_display': period_display
             }
         except Exception as e:
             print(f"Error parsing game: {e}")
@@ -371,118 +408,300 @@ class NFLPredictor:
             print(f"Error parsing completed game: {e}")
             return None
     
-    def extract_features(self, home_team_abbr, away_team_abbr):
-        """builds the feature array for logistic regression"""
-        # get all the stats we can about both teams
-        home_stats = self.get_team_stats(home_team_abbr)
-        away_stats = self.get_team_stats(away_team_abbr)
-        
-        home_form = self.get_recent_form(home_team_abbr)
-        away_form = self.get_recent_form(away_team_abbr)
-        
-        home_ppg = self.get_team_ppg(home_team_abbr)
-        away_ppg = self.get_team_ppg(away_team_abbr)
-        
-        home_ppg_allowed = self.get_team_ppg_allowed(home_team_abbr)
-        away_ppg_allowed = self.get_team_ppg_allowed(away_team_abbr)
-        
-        # features: difference between home and away team stats
-        features = [
-            home_stats.get('win_pct', 0.5) - away_stats.get('win_pct', 0.5),  # win % diff
-            home_stats.get('offense_rating', 70) - away_stats.get('offense_rating', 70),  # offense diff
-            home_stats.get('defense_rating', 70) - away_stats.get('defense_rating', 70),  # defense diff
-            home_form.get('form_rating', 50) - away_form.get('form_rating', 50),  # recent form diff
-            home_ppg - away_ppg,  # scoring diff
-            away_ppg_allowed - home_ppg_allowed,  # points allowed diff (flipped so positive = good for home)
-            home_ppg - home_ppg_allowed,  # home point differential
-            away_ppg - away_ppg_allowed,  # away point differential (will be subtracted)
-            1  # home field advantage indicator
-        ]
-        
-        return np.array(features)
+    # ========== ELO RATING SYSTEM METHODS ==========
     
-    def train_model(self):
-        """trains the logistic regression model on completed games"""
-        print("Training logistic regression model...")
+    def initialize_elo_ratings(self):
+        """sets all teams to base Elo rating"""
+        # all 32 NFL teams
+        nfl_teams = ['ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE',
+                     'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC',
+                     'LV', 'LAC', 'LAR', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
+                     'NYJ', 'PHI', 'PIT', 'SF', 'SEA', 'TB', 'TEN', 'WSH']
+        
+        for team in nfl_teams:
+            self.elo_ratings[team] = self.BASE_ELO
+        
+        print(f"Initialized Elo ratings for {len(nfl_teams)} NFL teams")
+    
+    def expected_win_probability(self, team_elo, opponent_elo, home_advantage=0):
+        """calculates expected win probability using Elo formula
+        
+        The formula: E = 1 / (1 + 10^((opponent_elo - team_elo - home_advantage) / 400))
+        """
+        exponent = (opponent_elo - team_elo - home_advantage) / 400
+        return 1 / (1 + math.pow(10, exponent))
+    
+    def update_elo(self, winner_elo, loser_elo, margin=None, k_factor=None):
+        """updates Elo ratings after a game
+        
+        Returns: (new_winner_elo, new_loser_elo)
+        
+        Margin of victory multiplier (optional):
+        - Blowouts change ratings more than close games
+        - MOV multiplier = ln(abs(margin) + 1) * (2.2 / (elo_diff * 0.001 + 2.2))
+        """
+        if k_factor is None:
+            k_factor = self.K_FACTOR
+        
+        # expected probability that winner wins
+        expected = self.expected_win_probability(winner_elo, loser_elo)
+        
+        # actual result is 1 (win) vs expected
+        actual = 1
+        
+        # base Elo change
+        change = k_factor * (actual - expected)
+        
+        # margin of victory multiplier (makes blowouts matter more)
+        if margin is not None and margin > 0:
+            elo_diff = abs(winner_elo - loser_elo)
+            # log formula prevents huge swings from massive blowouts
+            mov_multiplier = math.log(margin + 1) * (2.2 / (elo_diff * 0.001 + 2.2))
+            change *= mov_multiplier
+        
+        new_winner_elo = winner_elo + change
+        new_loser_elo = loser_elo - change
+        
+        return new_winner_elo, new_loser_elo
+    
+    def train_elo_model(self):
+        """builds Elo ratings from completed games this season"""
+        print("\n========== BUILDING ELO RATINGS ==========")
         
         completed_games = self.get_completed_games()
         
-        if len(completed_games) < 10:
-            # not enough data - use default coefficients based on nfl research
-            print(f"Only {len(completed_games)} games found. Using preset model weights.")
-            self.use_preset_model()
+        if len(completed_games) < 5:
+            print(f"Only {len(completed_games)} games found. Using base Elo ratings.")
+            self.use_preset_elo()
             return
         
-        print(f"Found {len(completed_games)} completed games for training")
+        print(f"Processing {len(completed_games)} completed games...")
         
-        X = []  # features
-        y = []  # outcomes (1 = home win, 0 = away win)
-        
+        games_processed = 0
         for game in completed_games:
             try:
-                features = self.extract_features(game['home_team_abbr'], game['away_team_abbr'])
-                X.append(features)
-                y.append(game['home_win'])
+                home_team = game['home_team_abbr']
+                away_team = game['away_team_abbr']
+                home_score = game['home_score']
+                away_score = game['away_score']
+                
+                # make sure we have ratings for both teams
+                if home_team not in self.elo_ratings:
+                    self.elo_ratings[home_team] = self.BASE_ELO
+                if away_team not in self.elo_ratings:
+                    self.elo_ratings[away_team] = self.BASE_ELO
+                
+                # determine winner and margin
+                if home_score > away_score:
+                    winner = home_team
+                    loser = away_team
+                    margin = home_score - away_score
+                elif away_score > home_score:
+                    winner = away_team
+                    loser = home_team
+                    margin = away_score - home_score
+                else:
+                    # tie - rare in NFL but handle it
+                    continue
+                
+                # update ratings
+                winner_elo = self.elo_ratings[winner]
+                loser_elo = self.elo_ratings[loser]
+                
+                new_winner_elo, new_loser_elo = self.update_elo(
+                    winner_elo, loser_elo, margin=margin
+                )
+                
+                self.elo_ratings[winner] = new_winner_elo
+                self.elo_ratings[loser] = new_loser_elo
+                games_processed += 1
+                
             except Exception as e:
-                print(f"Error extracting features: {e}")
+                print(f"Error processing game: {e}")
                 continue
         
-        if len(X) < 10:
-            print("Not enough valid training samples. Using preset model.")
-            self.use_preset_model()
-            return
+        print(f"\nElo ratings built from {games_processed} games!")
         
-        X = np.array(X)
-        y = np.array(y)
-        
-        # scale the features for better model performance
-        X_scaled = self.scaler.fit_transform(X)
-        
-        # train the model
-        self.model.fit(X_scaled, y)
-        self.model_trained = True
-        
-        # show how the model weighted each feature
-        print("\nLogistic Regression Model Trained!")
-        print("Feature Weights:")
-        feature_names = ['Win%', 'Offense', 'Defense', 'Form', 'PPG', 'PPG Allowed', 'Home Diff', 'Away Diff', 'Home Field']
-        for name, coef in zip(feature_names, self.model.coef_[0]):
-            print(f"  {name}: {coef:.3f}")
-        print(f"  Intercept: {self.model.intercept_[0]:.3f}")
-        
-        # quick accuracy check
-        predictions = self.model.predict(X_scaled)
-        accuracy = np.mean(predictions == y)
-        print(f"\nTraining Accuracy: {accuracy*100:.1f}%")
+        # show top and bottom teams
+        sorted_teams = sorted(self.elo_ratings.items(), key=lambda x: x[1], reverse=True)
+        print("\nTop 5 Teams by Elo:")
+        for team, elo in sorted_teams[:5]:
+            print(f"  {team}: {elo:.0f}")
+        print("\nBottom 5 Teams by Elo:")
+        for team, elo in sorted_teams[-5:]:
+            print(f"  {team}: {elo:.0f}")
     
-    def use_preset_model(self):
-        """uses preset weights when we dont have enough training data"""
-        # these weights are based on typical nfl prediction factors
-        # win % diff is most important, followed by point differential
-        self.model.coef_ = np.array([[2.5, 0.5, 0.4, 0.3, 0.6, 0.5, 0.8, -0.6, 0.4]])
-        self.model.intercept_ = np.array([0.1])  # slight home advantage
-        self.model.classes_ = np.array([0, 1])
+    def use_preset_elo(self):
+        """uses preset Elo ratings based on recent NFL performance"""
+        # preset ratings based on typical team strength (updated for 2024-25)
+        preset_ratings = {
+            'KC': 1620,   # chiefs - dynasty mode
+            'DET': 1600,  # lions - strong contender
+            'PHI': 1580,  # eagles - playoff team
+            'BUF': 1580,  # bills - playoff team
+            'BAL': 1575,  # ravens - strong
+            'SF': 1570,   # 49ers - still good
+            'MIN': 1560,  # vikings - solid
+            'GB': 1555,   # packers - rebuilding well
+            'HOU': 1550,  # texans - rising
+            'LAC': 1545,  # chargers - above average
+            'DEN': 1540,  # broncos - improving
+            'WAS': 1535,  # commanders - better
+            'TB': 1530,   # bucs - average plus
+            'PIT': 1525,  # steelers - average
+            'CIN': 1520,  # bengals - injury hurt
+            'SEA': 1515,  # seahawks - average
+            'MIA': 1510,  # dolphins - inconsistent
+            'LAR': 1505,  # rams - average
+            'ATL': 1500,  # falcons - middle
+            'DAL': 1495,  # cowboys - disappointing
+            'IND': 1490,  # colts - below average
+            'NO': 1485,   # saints - struggling
+            'NYJ': 1480,  # jets - below average
+            'ARI': 1475,  # cardinals - rebuilding
+            'CHI': 1470,  # bears - young team
+            'JAX': 1465,  # jaguars - down year
+            'NE': 1460,   # patriots - rebuilding
+            'TEN': 1455,  # titans - struggling
+            'CAR': 1450,  # panthers - weak
+            'CLE': 1445,  # browns - weak
+            'NYG': 1440,  # giants - bottom tier
+            'LV': 1435,   # raiders - rough year
+        }
         
-        # set up a basic scaler that doesn't change much
-        self.scaler.mean_ = np.zeros(9)
-        self.scaler.scale_ = np.ones(9)
-        self.scaler.var_ = np.ones(9)
-        self.scaler.n_features_in_ = 9
-        self.scaler.n_samples_seen_ = 100
+        for team, rating in preset_ratings.items():
+            self.elo_ratings[team] = rating
         
-        self.model_trained = True
-        print("Using preset model weights for predictions")
+        print("Using preset Elo ratings based on recent NFL performance")
     
-    def predict_with_model(self, home_team_abbr, away_team_abbr):
-        """uses the trained model to predict who wins"""
-        features = self.extract_features(home_team_abbr, away_team_abbr)
-        features_scaled = self.scaler.transform(features.reshape(1, -1))
+    def get_team_elo(self, team_abbr):
+        """gets current Elo rating for a team"""
+        if team_abbr not in self.elo_ratings:
+            self.elo_ratings[team_abbr] = self.BASE_ELO
+        return self.elo_ratings[team_abbr]
+    
+    def predict_with_elo(self, home_team_abbr, away_team_abbr):
+        """uses Elo ratings to predict who wins
         
-        # get probability that home team wins
-        home_win_prob = self.model.predict_proba(features_scaled)[0][1]
+        Returns win probability for home team (0-1)
+        """
+        home_elo = self.get_team_elo(home_team_abbr)
+        away_elo = self.get_team_elo(away_team_abbr)
+        
+        # home team gets home field advantage added to their Elo
+        home_win_prob = self.expected_win_probability(
+            home_elo, away_elo, home_advantage=self.HOME_ADVANTAGE
+        )
         
         return home_win_prob
     
+    def calculate_live_win_probability(self, home_team_abbr, away_team_abbr, 
+                                        home_score, away_score, period, clock=''):
+        """calculates in-game win probability based on score and time remaining
+        
+        Blends pre-game Elo probability with current game state.
+        As the game progresses, the current score matters more.
+        
+        NFL: 4 quarters of 15 minutes each = 60 minutes total
+        """
+        # get pre-game probability from Elo
+        pregame_prob = self.predict_with_elo(home_team_abbr, away_team_abbr)
+        
+        # if game hasn't started, return pregame probability
+        if period == 0 or (home_score == 0 and away_score == 0 and period <= 1):
+            return pregame_prob, 0.0  # (probability, time_elapsed_pct)
+        
+        # calculate time elapsed (0 to 1)
+        # NFL: 4 quarters, 15 min each
+        try:
+            # parse clock (format: "MM:SS" or "M:SS")
+            if clock and ':' in clock:
+                parts = clock.split(':')
+                minutes = int(parts[0])
+                seconds = int(parts[1]) if len(parts) > 1 else 0
+                time_left_in_period = minutes + seconds / 60
+            else:
+                time_left_in_period = 15  # assume start of period
+            
+            # total time elapsed
+            completed_quarters = min(period - 1, 4)
+            if period <= 4:
+                time_elapsed = (completed_quarters * 15) + (15 - time_left_in_period)
+            else:
+                # overtime
+                time_elapsed = 60 + ((period - 4 - 1) * 10) + (10 - min(time_left_in_period, 10))
+            
+            total_game_time = 60  # regulation
+            time_elapsed_pct = min(time_elapsed / total_game_time, 1.0)
+        except:
+            time_elapsed_pct = (period - 1) / 4  # fallback
+        
+        # score differential impact
+        score_diff = home_score - away_score
+        
+        # convert score differential to probability adjustment
+        # in NFL, each point is worth roughly 0.03 win probability
+        # but this scales with time remaining
+        points_per_prob = 0.03
+        score_impact = score_diff * points_per_prob
+        
+        # blend pregame probability with score-based probability
+        # early game: mostly pregame probability
+        # late game: mostly score-based
+        
+        # score-based probability (logistic function centered at 0)
+        score_prob = 1 / (1 + math.exp(-score_diff * 0.15))
+        
+        # weight based on time elapsed
+        # start: 80% pregame, 20% score
+        # end: 10% pregame, 90% score
+        pregame_weight = max(0.1, 0.8 - (time_elapsed_pct * 0.7))
+        score_weight = 1 - pregame_weight
+        
+        live_prob = (pregame_prob * pregame_weight) + (score_prob * score_weight)
+        
+        # cap between 0.01 and 0.99 (never say never in sports!)
+        live_prob = max(0.01, min(0.99, live_prob))
+        
+        return live_prob, time_elapsed_pct
+    
+    def update_elo_from_result(self, home_team_abbr, away_team_abbr, home_score, away_score):
+        """updates Elo ratings after a game finishes
+        
+        Called automatically when a game transitions to 'final' status
+        """
+        if home_score == away_score:
+            return  # ties don't update Elo (rare in NFL)
+        
+        if home_score > away_score:
+            winner = home_team_abbr
+            loser = away_team_abbr
+            margin = home_score - away_score
+        else:
+            winner = away_team_abbr
+            loser = home_team_abbr
+            margin = away_score - home_score
+        
+        winner_elo = self.get_team_elo(winner)
+        loser_elo = self.get_team_elo(loser)
+        
+        new_winner_elo, new_loser_elo = self.update_elo(
+            winner_elo, loser_elo, margin=margin
+        )
+        
+        self.elo_ratings[winner] = new_winner_elo
+        self.elo_ratings[loser] = new_loser_elo
+        
+        print(f"Elo Updated: {winner} {winner_elo:.0f} -> {new_winner_elo:.0f}, "
+              f"{loser} {loser_elo:.0f} -> {new_loser_elo:.0f}")
+        
+        return {
+            'winner': winner,
+            'loser': loser,
+            'winner_elo_change': new_winner_elo - winner_elo,
+            'loser_elo_change': new_loser_elo - loser_elo
+        }
+
     def analyze_quarterback(self, team_abbr):
         """figures out how good their qb is"""
         qb_analysis = {
@@ -733,8 +952,35 @@ class NFLPredictor:
         home_injuries = self.get_injury_report(home_team)
         away_injuries = self.get_injury_report(away_team)
         
-        # USE LOGISTIC REGRESSION to predict the winner
-        home_win_prob = self.predict_with_model(home_team, away_team)
+        # ========== LIVE GAME HANDLING ==========
+        is_live = game_info.get('is_live', False)
+        is_final = game_info.get('is_final', False)
+        home_score = game_info.get('home_score', 0)
+        away_score = game_info.get('away_score', 0)
+        period = game_info.get('period', 0)
+        clock = game_info.get('clock', '')
+        
+        # USE ELO RATING SYSTEM to predict the winner
+        pregame_prob = self.predict_with_elo(home_team, away_team)
+        
+        # if game is live, calculate live win probability
+        if is_live:
+            home_win_prob, time_elapsed_pct = self.calculate_live_win_probability(
+                home_team, away_team, home_score, away_score, period, clock
+            )
+        elif is_final:
+            # game is over - winner has 100% probability
+            if home_score > away_score:
+                home_win_prob = 1.0
+            elif away_score > home_score:
+                home_win_prob = 0.0
+            else:
+                home_win_prob = 0.5  # tie
+            time_elapsed_pct = 1.0
+        else:
+            # game hasn't started - use pregame probability
+            home_win_prob = pregame_prob
+            time_elapsed_pct = 0.0
         
         # whoever has higher probability wins
         if home_win_prob >= 0.5:
@@ -744,8 +990,8 @@ class NFLPredictor:
             predicted_winner = game_info['away_team']
             confidence_pct = (1 - home_win_prob) * 100
         
-        # cap confidence between 50-95%
-        confidence_pct = max(50, min(95, confidence_pct))
+        # cap confidence between 50-99%
+        confidence_pct = max(50, min(99, confidence_pct))
         
         # now predict the actual score using their averages
         home_ppg = self.get_team_ppg(home_team)
@@ -755,7 +1001,7 @@ class NFLPredictor:
         
         # mix their scoring with how much the other team allows
         # adjust based on predicted probability
-        prob_diff = (home_win_prob - 0.5) * 2  # scale to -1 to 1
+        prob_diff = (pregame_prob - 0.5) * 2  # use pregame for score prediction
         
         home_predicted = round((home_ppg + away_ppg_allowed) / 2 + (prob_diff * 5))
         away_predicted = round((away_ppg + home_ppg_allowed) / 2 - (prob_diff * 5))
@@ -768,7 +1014,7 @@ class NFLPredictor:
         away_predicted = max(10, min(50, away_predicted))
         
         # winner should have higher score
-        if home_win_prob >= 0.5:
+        if pregame_prob >= 0.5:
             if home_predicted <= away_predicted:
                 home_predicted = away_predicted + 3
             predicted_score = f"{home_predicted}-{away_predicted}"
@@ -776,6 +1022,23 @@ class NFLPredictor:
             if away_predicted <= home_predicted:
                 away_predicted = home_predicted + 3
             predicted_score = f"{away_predicted}-{home_predicted}"
+        
+        # get Elo ratings for response
+        home_elo = self.get_team_elo(home_team)
+        away_elo = self.get_team_elo(away_team)
+        
+        # build live data object for frontend
+        live_data = {
+            'is_live': is_live,
+            'is_final': is_final,
+            'home_score': home_score,
+            'away_score': away_score,
+            'period': period,
+            'clock': clock,
+            'pregame_probability': round(pregame_prob * 100, 1),
+            'live_probability': round(home_win_prob * 100, 1) if is_live else None,
+            'time_elapsed_pct': round(time_elapsed_pct * 100, 1) if is_live else None
+        }
         
         return {
             'game_id': game_info['game_id'],
@@ -789,9 +1052,14 @@ class NFLPredictor:
             'confidence': round(confidence_pct, 1),
             'predicted_score': predicted_score,
             'home_win_probability': round(home_win_prob * 100, 1),
+            'prediction_method': 'elo',
+            'live_data': live_data,
             'analysis': {
                 'home_win_prob': round(home_win_prob * 100, 1),
                 'away_win_prob': round((1 - home_win_prob) * 100, 1),
+                'home_elo': round(home_elo),
+                'away_elo': round(away_elo),
+                'elo_diff': round(home_elo - away_elo),
                 'home_qb': home_qb,
                 'away_qb': away_qb,
                 'home_injuries': home_injuries,
@@ -1701,18 +1969,57 @@ def api_status():
 def home():
     """just shows basic info about the api"""
     return jsonify({
-        'message': 'NFL Predictor API',
-        'version': '1.0',
+        'message': 'NFL & NBA Predictor API',
+        'version': '1.1',
         'endpoints': [
-            '/api/games - Get all games with predictions',
-            '/api/predict - Predict a single game',
+            '/api/games - Get NFL games with predictions',
+            '/api/predict - Predict a single NFL game',
             '/api/status - Check API status',
             '/api/teams - Get all NFL teams',
-            '/api/teams/year/<year> - Get teams that existed in a given year',
-            '/api/teams/<abbr>/stats - Get historical stats for a team',
-            '/api/predict/custom - Predict a custom historical matchup'
+            '/api/teams/year/<year> - Get NFL teams that existed in a given year',
+            '/api/teams/<abbr>/stats - Get historical stats for an NFL team',
+            '/api/predict/custom - Predict a custom historical NFL matchup',
+            '/api/elo - Get current NFL Elo ratings',
+            '/api/nba/games - Get NBA games with predictions',
+            '/api/nba/teams - Get all NBA teams',
+            '/api/nba/standings - Get current NBA standings',
+            '/api/nba/elo - Get current NBA Elo ratings'
         ]
     })
+
+# ========== ELO RATINGS ENDPOINT ==========
+
+@app.route('/api/elo', methods=['GET'])
+def get_elo_ratings():
+    """returns current Elo ratings for all NFL teams"""
+    try:
+        sorted_teams = sorted(predictor.elo_ratings.items(), key=lambda x: x[1], reverse=True)
+        
+        ratings = []
+        for rank, (team, elo) in enumerate(sorted_teams, 1):
+            team_info = predictor.NFL_TEAMS.get(team, {})
+            ratings.append({
+                'rank': rank,
+                'team': team,
+                'name': team_info.get('name', team),
+                'elo': round(elo),
+                'above_average': round(elo - 1500)
+            })
+        
+        return jsonify({
+            'success': True,
+            'prediction_method': 'elo',
+            'base_elo': predictor.BASE_ELO,
+            'k_factor': predictor.K_FACTOR,
+            'home_advantage': predictor.HOME_ADVANTAGE,
+            'count': len(ratings),
+            'ratings': ratings
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # ========== CUSTOM GAME PREDICTOR ENDPOINTS ==========
 
@@ -1863,24 +2170,137 @@ def predict_custom_game():
             'error': str(e)
         }), 500
 
+
+@app.route('/api/demo/live', methods=['GET'])
+def get_demo_live_games():
+    """returns simulated live NFL games for testing the live UI
+    
+    Games progress based on real time - refresh to see updates!
+    """
+    import random
+    import time
+    
+    # use current time to simulate game progression
+    # each "game minute" = 4 real seconds (so a full game is ~4 min real time)
+    current_time = int(time.time())
+    
+    # optional parameters to override automatic progression
+    override_period = request.args.get('period', None, type=int)
+    override_clock = request.args.get('clock', None)
+    override_home = request.args.get('home_score', None, type=int)
+    override_away = request.args.get('away_score', None, type=int)
+    
+    # create some demo matchups with different "start times"
+    demo_games = [
+        {'home': 'KC', 'away': 'BUF', 'venue': 'GEHA Field at Arrowhead Stadium', 'start_offset': 0},
+        {'home': 'SF', 'away': 'DAL', 'venue': 'Levi\'s Stadium', 'start_offset': 60},
+        {'home': 'PHI', 'away': 'NYG', 'venue': 'Lincoln Financial Field', 'start_offset': 120},
+    ]
+    
+    predictions = []
+    for i, game in enumerate(demo_games):
+        home_team = game['home']
+        away_team = game['away']
+        
+        # calculate game time elapsed (in game minutes)
+        # 4 real seconds = 1 game minute, full game = 60 minutes = 240 real seconds
+        game_start = current_time - game['start_offset']
+        elapsed_seconds = game_start % 280  # cycle every ~4.5 min (full game + breaks)
+        game_minutes_elapsed = elapsed_seconds / 4  # 0-70 game minutes
+        
+        # determine period and clock based on elapsed time (NFL: 4 quarters, 15 min each)
+        if override_period is not None:
+            period = override_period
+            clock = override_clock or '7:30'
+        else:
+            if game_minutes_elapsed < 15:
+                period = 1
+                mins_left = 15 - game_minutes_elapsed
+            elif game_minutes_elapsed < 30:
+                period = 2
+                mins_left = 30 - game_minutes_elapsed
+            elif game_minutes_elapsed < 45:
+                period = 3
+                mins_left = 45 - game_minutes_elapsed
+            elif game_minutes_elapsed < 60:
+                period = 4
+                mins_left = 60 - game_minutes_elapsed
+            else:
+                # game finished, restart cycle
+                period = 4
+                mins_left = 0.1
+            
+            mins = int(mins_left)
+            secs = int((mins_left - mins) * 60)
+            clock = f"{mins}:{secs:02d}"
+        
+        # calculate score based on time elapsed (roughly 0.4 pts per minute per team in NFL)
+        if override_home is not None:
+            h_score = override_home + (i * 3)
+            a_score = override_away + (i * 3) if override_away else h_score - 3
+        else:
+            # base scoring rate with some randomness seeded by game index
+            random.seed(current_time // 15 + i)  # changes every 15 seconds (touchdown moments)
+            base_pts = game_minutes_elapsed * 0.4
+            
+            # NFL scores come in chunks (3, 6, 7 points)
+            h_score = int(base_pts + random.choice([0, 0, 3, 3, 7, 7]) * (game_minutes_elapsed // 10))
+            a_score = int(base_pts + random.choice([0, 0, 3, 3, 7, 7]) * (game_minutes_elapsed // 10))
+            
+            # ensure scores are reasonable
+            h_score = max(0, min(56, h_score))
+            a_score = max(0, min(56, a_score))
+        
+        # create game info
+        game_info = {
+            'game_id': f'demo_{i+1}',
+            'home_team': predictor.NFL_TEAMS[home_team]['name'],
+            'away_team': predictor.NFL_TEAMS[away_team]['name'],
+            'home_team_abbr': home_team,
+            'away_team_abbr': away_team,
+            'venue': game['venue'],
+            'game_date': '2026-04-14T20:00:00Z',
+            'home_record': '10-4',
+            'away_record': '9-5',
+            'week': 15,
+            'is_live': True,
+            'is_final': False,
+            'home_score': h_score,
+            'away_score': a_score,
+            'period': period,
+            'clock': clock
+        }
+        
+        prediction = predictor.predict_game(game_info)
+        predictions.append(prediction)
+    
+    return jsonify({
+        'success': True,
+        'demo_mode': True,
+        'count': len(predictions),
+        'games': predictions,
+        'message': 'Demo games progress in real-time! Refresh to see updates. Full game cycle = ~4.5 min real time.'
+    })
+
+
 if __name__ == '__main__':
     print("=" * 60)
-    print("NFL PREDICTOR API STARTING")
-    print("Using LOGISTIC REGRESSION for predictions")
+    print("NFL & NBA PREDICTOR API STARTING")
+    print("Using ELO RATING SYSTEM for predictions")
     print("=" * 60)
     print("\nAPI Status:")
-    print(f"  ESPN API: Active (No key required)")
+    print(f"  ESPN API: Active")
     print(f"  SportsData.io: {'Active' if API_KEYS['SPORTSDATA_IO'] else 'No API Key'}")
+    print("\nElo Rating System:")
+    print("   - Base Elo: 1500 for all teams")
+    print("   - K-Factor: 20 (rating volatility)")
+    print("   - Home Advantage: +65 Elo (~2.5 points)")
+    print("   - Margin of Victory: Affects rating changes")
     print("\nFeatures:")
-    print("   Logistic Regression prediction model")
-    print("   Real-time game schedules")
-    print("   Rookie QB analysis")
-    print("   Depth chart evaluation")
+    print("   Elo rating prediction model")
+    print("   NFL & NBA real-time game schedules")
     print(f"   {'Enhanced' if API_KEYS['SPORTSDATA_IO'] else 'Basic'} injury reports")
     print(f"   {'Enhanced' if API_KEYS['SPORTSDATA_IO'] else 'Basic'} detailed player statistics")
-    print("\nTo enable enhanced features:")
-    print("  1. Get free API key from https://sportsdata.io")
-    print("  2. Set environment variable: SPORTSDATA_API_KEY=your_key")
     print("=" * 60)
     print("\nServer running at http://localhost:5000")
     print("=" * 60)
