@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import requests
 import os
@@ -1966,8 +1966,26 @@ def api_status():
     })
 
 @app.route('/')
-def home():
-    """just shows basic info about the api"""
+def serve_index():
+    """serve the frontend app"""
+    return send_from_directory('.', 'index.html')
+
+
+@app.route('/script.js')
+def serve_script():
+    """serve frontend javascript"""
+    return send_from_directory('.', 'script.js')
+
+
+@app.route('/style.css')
+def serve_style():
+    """serve frontend stylesheet"""
+    return send_from_directory('.', 'style.css')
+
+
+@app.route('/api')
+def api_home():
+    """shows basic info about the api"""
     return jsonify({
         'message': 'NFL & NBA Predictor API',
         'version': '1.1',
@@ -2190,8 +2208,9 @@ if __name__ == '__main__':
     print(f"   {'Enhanced' if API_KEYS['SPORTSDATA_IO'] else 'Basic'} injury reports")
     print(f"   {'Enhanced' if API_KEYS['SPORTSDATA_IO'] else 'Basic'} detailed player statistics")
     print("=" * 60)
-    print("\nServer running at http://localhost:5000")
+    port = int(os.environ.get('PORT', 5000))
+    print(f"\nServer running at http://localhost:{port}")
     print("=" * 60)
     
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', debug=True, port=port)
 
