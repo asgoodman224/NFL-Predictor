@@ -186,6 +186,3 @@ curl -X POST http://localhost:5000/api/predict/custom \
 - Live scores and game availability depend on upstream API availability.
 - Historical team naming/availability is constrained by configured team metadata and year rules in the backend.
 
-## License
-
-Add your preferred license here (for example, MIT) if you plan to distribute publicly.
