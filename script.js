@@ -27,7 +27,7 @@ const predictCustomBtn = document.getElementById('predictCustomBtn');
 const customResultContainer = document.getElementById('customResultContainer');
 
 // where the server is running
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = window.location.origin;
 
 // navigation handling
 homeLink.addEventListener('click', (e) => {
