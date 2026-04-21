@@ -322,9 +322,9 @@ function createGameCard(game, gameNumber) {
         statusBadge = '<div class="status-badge live-badge">LIVE</div>';
         liveScoreDisplay = `
             <div class="live-score">
-                <span class="score">${liveData.home_score || 0}</span>
-                <span class="score-separator">-</span>
                 <span class="score">${liveData.away_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.home_score || 0}</span>
             </div>
             <div class="game-clock">Q${liveData.period || 1} - ${liveData.clock || '15:00'}</div>
         `;
@@ -344,9 +344,9 @@ function createGameCard(game, gameNumber) {
         statusBadge = '<div class="status-badge final-badge">FINAL</div>';
         liveScoreDisplay = `
             <div class="final-score">
-                <span class="score">${liveData.home_score || 0}</span>
-                <span class="score-separator">-</span>
                 <span class="score">${liveData.away_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.home_score || 0}</span>
             </div>
         `;
     }
@@ -1186,9 +1186,9 @@ function createNBAGameCard(game, gameNumber, scoreChanges = null) {
         statusBadge = '<div class="status-badge live-badge">LIVE</div>';
         liveScoreDisplay = `
             <div class="live-score">
-                <span class="${homeScoreClass}">${liveData.home_score || 0}</span>
-                <span class="score-separator">-</span>
                 <span class="${awayScoreClass}">${liveData.away_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="${homeScoreClass}">${liveData.home_score || 0}</span>
             </div>
             <div class="game-clock">Q${liveData.period || 1} - ${liveData.clock || '12:00'}</div>
         `;
@@ -1208,9 +1208,9 @@ function createNBAGameCard(game, gameNumber, scoreChanges = null) {
         statusBadge = '<div class="status-badge final-badge">FINAL</div>';
         liveScoreDisplay = `
             <div class="final-score">
-                <span class="score">${liveData.home_score || 0}</span>
-                <span class="score-separator">-</span>
                 <span class="score">${liveData.away_score || 0}</span>
+                <span class="score-separator">-</span>
+                <span class="score">${liveData.home_score || 0}</span>
             </div>
         `;
     }
