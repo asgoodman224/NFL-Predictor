@@ -77,6 +77,9 @@ function showNBAPage() {
     gamesContainer.style.display = 'none';
     customGameContainer.style.display = 'none';
     nbaContainer.style.display = 'block';
+
+    // keep the NBA date list current each time user opens this page
+    populateNBADateOptions();
 }
 
 function showCustomGamePage() {
@@ -202,7 +205,7 @@ function startLiveRefresh(sport) {
     } else if (sport === 'nba') {
         if (nbaLiveInterval) clearInterval(nbaLiveInterval);
         nbaLiveInterval = setInterval(() => {
-            if (nbaDateSelect.value === 'today') {
+            if (isTodayDateValue(getSelectedNBADate())) {
                 loadNBAGamesQuiet();
             } else {
                 stopLiveRefresh('nba');
@@ -1001,30 +1004,75 @@ if (loadNBAGamesBtn) {
     loadNBAGamesBtn.addEventListener('click', loadNBAGames);
 }
 
+// build a rolling NBA date range so users can browse far beyond just yesterday/today/tomorrow
+function populateNBADateOptions(daysBack = 14, daysForward = 14) {
+    if (!nbaDateSelect) return;
+
+    const previousValue = nbaDateSelect.value;
+    const today = new Date();
+    const todayValue = formatDate(today);
+
+    nbaDateSelect.innerHTML = '';
+
+    for (let offset = -daysBack; offset <= daysForward; offset++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + offset);
+
+        const value = formatDate(date);
+        const labelDate = date.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric'
+        });
+
+        let label = labelDate;
+        if (offset === 0) label = `Today (${labelDate})`;
+        if (offset === -1) label = `Yesterday (${labelDate})`;
+        if (offset === 1) label = `Tomorrow (${labelDate})`;
+
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        nbaDateSelect.appendChild(option);
+    }
+
+    // preserve selection when possible; otherwise default to today
+    nbaDateSelect.value = previousValue && nbaDateSelect.querySelector(`option[value="${previousValue}"]`)
+        ? previousValue
+        : todayValue;
+}
+
+function getSelectedNBADate() {
+    const selection = nbaDateSelect?.value;
+    const today = new Date();
+
+    // backward compatibility if old options are ever present
+    if (selection === 'today') return formatDate(today);
+    if (selection === 'tomorrow') {
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return formatDate(tomorrow);
+    }
+    if (selection === 'yesterday') {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return formatDate(yesterday);
+    }
+
+    return selection || formatDate(today);
+}
+
+function isTodayDateValue(dateValue) {
+    return dateValue === formatDate(new Date());
+}
+
 async function loadNBAGames() {
     // show loading spinner while we wait
     nbaGamesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading NBA Games...</div>';
 
     try {
-        // figure out which date they want
-        const selection = nbaDateSelect.value;
         let url = `${API_BASE_URL}/api/nba/games`;
-        
-        // calculate date based on selection
-        const today = new Date();
-        let dateStr = '';
-        
-        if (selection === 'today') {
-            dateStr = formatDate(today);
-        } else if (selection === 'tomorrow') {
-            const tomorrow = new Date(today);
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            dateStr = formatDate(tomorrow);
-        } else if (selection === 'yesterday') {
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
-            dateStr = formatDate(yesterday);
-        }
+        const dateStr = getSelectedNBADate();
         
         if (dateStr) {
             url += `?date=${dateStr}`;
@@ -1063,7 +1111,7 @@ async function loadNBAGames() {
             
             // if today and any games are live, auto-refresh every 5 seconds
             const hasLiveGames = data.games.some(g => g.live_data && g.live_data.is_live);
-            if (selection === 'today' && hasLiveGames) {
+            if (isTodayDateValue(dateStr) && hasLiveGames) {
                 const liveMsg = document.createElement('div');
                 liveMsg.className = 'live-refresh-msg';
                 liveMsg.innerHTML = ' LIVE - Predictions updating every 5 seconds';
@@ -1092,8 +1140,12 @@ async function loadNBAGames() {
 // quiet reload for NBA without loading spinner
 async function loadNBAGamesQuiet() {
     try {
-        const today = new Date();
-        const dateStr = formatDate(today);
+        const dateStr = getSelectedNBADate();
+        if (!isTodayDateValue(dateStr)) {
+            stopLiveRefresh('nba');
+            return;
+        }
+
         const response = await fetch(`${API_BASE_URL}/api/nba/games?date=${dateStr}`);
         if (!response.ok) return;
 
@@ -1142,6 +1194,9 @@ function formatDate(date) {
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}${month}${day}`;
 }
+
+// initialize NBA date list on page load
+populateNBADateOptions();
 
 // builds the html for each nba game card
 function createNBAGameCard(game, gameNumber, scoreChanges = null) {
