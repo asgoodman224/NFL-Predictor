@@ -3,6 +3,14 @@
 Live site:
 https://nfl-nba-predictor.onrender.com/
 
+## What This Project Is About
+
+This is a sports game prediction web app built with Python and Flask. It uses an Elo rating system to predict the outcomes of NFL and NBA games, pulling live schedule and score data from ESPN's public API.
+
+The app lets you browse current and past games with win probability predictions, watch live score updates refresh in real time, and simulate custom historical matchups — for example, pitting the 2007 New England Patriots against the 2019 Kansas City Chiefs to see who would win based on their actual season statistics.
+
+Predictions are generated using each team's Elo rating, which is calculated from completed game results and accounts for margin of victory and home field advantage. The site is fully deployed and requires no account or login to use.
+
 ## How the Website Works
 
 This website has three main sections:
